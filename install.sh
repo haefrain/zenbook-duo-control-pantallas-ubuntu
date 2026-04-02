@@ -27,15 +27,24 @@ ask_yn() {
     local default="${2:-s}"
     local hint
     [ "$default" = "s" ] && hint="[S/n]" || hint="[s/N]"
-    printf "  %s %s: " "$prompt" "$hint"
+    printf "  %s %s: " "$prompt" "$hint" >&2
     read -r ans
     ans="${ans:-$default}"
-    [[ "$ans" =~ ^[SsYy] ]] && echo "true" || echo "false"
+    case "$ans" in
+        [SsYy]*)
+            echo -e "         ${GREEN}✓ Activado${NC}" >&2
+            echo "true"
+            ;;
+        *)
+            echo -e "         ${YELLOW}✗ Desactivado${NC}" >&2
+            echo "false"
+            ;;
+    esac
 }
 
 ask_val() {
     # ask_val "Pregunta" "default"
-    printf "  %s [%s]: " "$1" "$2"
+    printf "  %s [%s]: " "$1" "$2" >&2
     read -r val
     echo "${val:-$2}"
 }

@@ -18,7 +18,7 @@ ExecStartPre=/bin/bash -c '\
   done; \
   echo "Wayland no disponible tras 60s"; exit 1'
 
-ExecStart=/opt/zenbook-duo/venv/bin/python3 /opt/zenbook-duo/core/daemon.py
+ExecStart=/opt/zenbook-duo/venv/bin/python3 -m core.daemon
 
 Restart=on-failure
 RestartSec=10

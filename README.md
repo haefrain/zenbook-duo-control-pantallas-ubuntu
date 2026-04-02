@@ -33,9 +33,25 @@ sudo ./install.sh
 El instalador hace todo automáticamente:
 1. Detecta tu usuario
 2. Instala las dependencias del sistema (`iio-sensor-proxy`, `python3-dbus`, etc.)
-3. Te pregunta qué funciones quieres activar
+3. Te pregunta qué funciones quieres activar — responde **`s`** (o `S`/`y`/`Y`) para sí, **`n`** (o `N`) para no; pulsa **Enter** para aceptar el valor por defecto que aparece entre corchetes
 4. Crea `/opt/zenbook-duo/config.yaml` con tu configuración
 5. Instala y activa el servicio `zenbook-duo` en systemd
+
+---
+
+## Reconfigurar sin reinstalar
+
+Si ya tienes el proyecto instalado y quieres cambiar qué funciones están activas o ajustar cualquier valor:
+
+```bash
+sudo ./configure.sh
+```
+
+El configurador:
+1. Muestra el estado actual de cada función
+2. Te pregunta una a una — pulsa **Enter** para mantener el valor actual, **`s`** para activar, **`n`** para desactivar
+3. Actualiza `/opt/zenbook-duo/config.yaml`
+4. Reinicia el servicio automáticamente
 
 ---
 
@@ -155,13 +171,16 @@ sudo -u TU_USUARIO env \
 ## Gestión del servicio
 
 ```bash
+# Reconfigurar funciones y ajustes (interactivo)
+sudo ./configure.sh
+
 # Estado actual
 systemctl status zenbook-duo
 
 # Logs en tiempo real
 journalctl -u zenbook-duo -f
 
-# Reiniciar tras cambiar config.yaml
+# Reiniciar tras cambiar config.yaml manualmente
 sudo systemctl restart zenbook-duo
 
 # Detener temporalmente
@@ -325,6 +344,8 @@ sudo ./install.sh
 ```
 
 El instalador es idempotente: si ya está instalado, actualiza los archivos y reinicia el servicio.
+
+> Si solo quieres cambiar la configuración sin actualizar el código, usa `sudo ./configure.sh` en lugar de reinstalar.
 
 ---
 
