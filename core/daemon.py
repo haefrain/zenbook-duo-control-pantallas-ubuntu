@@ -90,24 +90,26 @@ def main():
 
     is_docked = dock_monitor.is_docked if dock_monitor is not None else lambda: False
 
-    # --- Brillo automático ---
-    brightness_manager = None
-    if features.get('auto_brightness', True):
-        brightness_manager = BrightnessManager(
-            session_runner=run_in_user_session,
-            username=user,
-        )
-        brightness_manager.start()
-        print("[BRILLO] Brillo automático activado (sincronización manual en paralelo)")
+    # --- Brillo: sync de teclas siempre activo; sensor solo si auto_brightness: true ---
+    auto_brightness = features.get('auto_brightness', True)
+    brightness_manager = BrightnessManager(
+        session_runner=run_in_user_session,
+        username=user,
+    )
+    brightness_manager.start()  # arranca el hilo de sync manual (teclas → eDP-2)
+    if auto_brightness:
+        print("[BRILLO] Brillo automático activado (sensor + sync de teclas en paralelo)")
+    else:
+        print("[BRILLO] Sync de teclas de brillo activado (sensor desactivado)")
 
     # --- Rotación automática (el loop también alimenta auto_brightness) ---
     rotation_enabled = features.get('auto_rotate', True)
-    if rotation_enabled or brightness_manager:
+    if rotation_enabled or auto_brightness:
         rot_manager = RotationManager(
             config=config,
             session_runner=run_in_user_session,
             is_docked_callback=is_docked,
-            brightness_manager=brightness_manager,
+            brightness_manager=brightness_manager if auto_brightness else None,
             rotation_enabled=rotation_enabled,
         )
         rot_manager.start()
