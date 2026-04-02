@@ -1,0 +1,21 @@
+system:
+  username: "tu_usuario"  # resultado de: whoami
+
+features:
+  auto_rotate: true       # Rotar pantallas al girar el equipo
+  auto_brightness: true   # Ajustar brillo según luz ambiental
+  battery_protection: true  # Limitar carga máxima de la batería
+  display_dock: true      # Apagar/encender pantalla inferior con el teclado
+
+keyboard:
+  vendor_id: "0b05"       # Ver con: lsusb | grep -i asus
+  product_id: "1b2c"
+  mac_address: "XX:XX:XX:XX:XX:XX"  # Ver con: bluetoothctl devices
+
+displays:
+  top: "eDP-1"
+  bottom: "eDP-2"
+  scale: 2                # Factor de escala HiDPI (normalmente 2 en OLED 2.8K)
+
+battery:
+  charge_limit: 80        # Porcentaje máximo de carga (recomendado: 80)
