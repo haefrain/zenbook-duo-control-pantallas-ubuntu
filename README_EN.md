@@ -7,9 +7,10 @@ Hardware control for the ASUS Zenbook Duo with dual OLED screens on Ubuntu 24. A
 | Feature | Description |
 |---|---|
 | **Auto-rotation** | Rotates both screens when the device is turned (laptop mode ↔ book mode) |
-| **Auto-brightness** | Adjusts brightness on both screens using the built-in ambient light sensor |
+| **Auto-brightness** | Adjusts brightness on both screens in parallel using the built-in ambient light sensor; syncs eDP-2 when brightness keys are used |
 | **Battery protection** | Caps the maximum charge level to extend battery lifespan |
 | **Secondary screen control** | Turns off the lower screen when the keyboard is attached and turns it back on when detached; automatically reconnects the Bluetooth keyboard |
+| **Touchscreen mapping** | Assigns each touchscreen to its correct display in GNOME Wayland (works around the identical-EDID problem shared by both panels) |
 
 ---
 
@@ -121,6 +122,7 @@ features:
   auto_brightness: true             # Brightness from ambient light sensor
   battery_protection: true          # Battery charge limit
   display_dock: true                # Lower screen control with keyboard
+  touchscreen_mapping: true         # Map each touchscreen to its correct display
 
 keyboard:
   vendor_id: "0b05"                 # See: lsusb | grep -i asus
@@ -134,6 +136,11 @@ displays:
 
 battery:
   charge_limit: 80                  # Maximum charge percentage
+
+touchscreen:
+  top_device: "04f3:425b"           # HID vendor:product of the top touchscreen (ELAN9008)
+  bottom_device: "04f3:425a"        # HID vendor:product of the bottom touchscreen (ELAN9009)
+  swap: false                       # Set to true if the touchscreens are mapped in reverse
 ```
 
 ### How to find each value
@@ -281,6 +288,45 @@ ls /sys/class/backlight/asus_screenpad/
 # Manual test as root:
 echo 120 | sudo tee /sys/class/backlight/asus_screenpad/brightness
 echo 200 | sudo tee /sys/class/backlight/card1-eDP-2-backlight/brightness
+```
+
+---
+
+### Brightness keys do not change eDP-2
+
+The daemon monitors the GNOME D-Bus for manual brightness changes and replicates them to eDP-2. If it is not working, check that the service is running and that `gnome-settings-daemon` is active:
+
+```bash
+pgrep -a gsd-power
+journalctl -u zenbook-duo -f   # look for lines "[BRILLO] Tecla →"
+```
+
+---
+
+### Touchscreens do not respond on the correct screen
+
+**1. Check that the mapping was applied:**
+```bash
+dconf dump /org/gnome/desktop/peripherals/touchscreens/
+# Should show:
+# [04f3:425b/]
+# output=['', 'eDP-1', '']
+#
+# [04f3:425a/]
+# output=['', 'eDP-2', '']
+```
+
+**2. If the mapping is reversed** (eDP-2 touch acts on eDP-1 and vice versa), enable `swap` in the config:
+```bash
+sudo nano /opt/zenbook-duo/config.yaml
+# Change:  swap: false  →  swap: true
+sudo systemctl restart zenbook-duo
+```
+
+**3. If the device IDs differ on your device:**
+```bash
+cat /proc/bus/input/devices | grep -A3 "ELAN"
+# Note the Vendor/Product of each touchscreen and update top_device and bottom_device
 ```
 
 ---

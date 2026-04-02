@@ -9,9 +9,10 @@ Control de hardware para el ASUS Zenbook Duo con doble pantalla OLED en Ubuntu 2
 | Función | Descripción |
 |---|---|
 | **Auto-rotación** | Rota ambas pantallas al girar el equipo (modo portátil ↔ modo libro) |
-| **Brillo automático** | Ajusta el brillo de ambas pantallas según el sensor de luz ambiental integrado |
+| **Brillo automático** | Ajusta el brillo de ambas pantallas en paralelo según el sensor de luz ambiental integrado; sincroniza eDP-2 cuando se usan las teclas de brillo |
 | **Protección de batería** | Limita la carga máxima para prolongar la vida útil de la batería |
 | **Control de pantalla inferior** | Apaga la pantalla inferior al acoplar el teclado y la enciende al retirarlo; reconecta el teclado Bluetooth automáticamente |
+| **Mapeo de touchscreens** | Asigna cada pantalla táctil a su pantalla correcta en GNOME Wayland (soluciona el problema de EDID idéntico entre ambos paneles) |
 
 ---
 
@@ -123,6 +124,7 @@ features:
   auto_brightness: true             # Brillo por sensor de luz ambiental
   battery_protection: true          # Límite de carga de la batería
   display_dock: true                # Control de pantalla inferior con el teclado
+  touchscreen_mapping: true         # Mapear cada touchscreen a su pantalla correcta
 
 keyboard:
   vendor_id: "0b05"                 # Ver con: lsusb | grep -i asus
@@ -136,6 +138,11 @@ displays:
 
 battery:
   charge_limit: 80                  # Porcentaje máximo de carga
+
+touchscreen:
+  top_device: "04f3:425b"           # HID vendor:product del touchscreen superior (ELAN9008)
+  bottom_device: "04f3:425a"        # HID vendor:product del touchscreen inferior (ELAN9009)
+  swap: false                       # Cambiar a true si los touchscreens quedan invertidos
 ```
 
 ### Cómo obtener cada valor
@@ -283,6 +290,45 @@ ls /sys/class/backlight/asus_screenpad/
 # Prueba manual como root:
 echo 120 | sudo tee /sys/class/backlight/asus_screenpad/brightness
 echo 200 | sudo tee /sys/class/backlight/card1-eDP-2-backlight/brightness
+```
+
+---
+
+### El brillo no cambia en eDP-2 al pulsar las teclas de brillo
+
+El daemon monitorea el D-Bus de GNOME para detectar cambios manuales de brillo y replicarlos a eDP-2. Si no funciona, verifica que el servicio esté corriendo y que `gnome-settings-daemon` esté activo:
+
+```bash
+pgrep -a gsd-power
+journalctl -u zenbook-duo -f   # busca líneas "[BRILLO] Tecla →"
+```
+
+---
+
+### Los touchscreens no responden en la pantalla correcta
+
+**1. Verifica que el mapeo se aplicó:**
+```bash
+dconf dump /org/gnome/desktop/peripherals/touchscreens/
+# Debe mostrar:
+# [04f3:425b/]
+# output=['', 'eDP-1', '']
+#
+# [04f3:425a/]
+# output=['', 'eDP-2', '']
+```
+
+**2. Si el mapeo está invertido** (el touch de eDP-2 actúa sobre eDP-1 y viceversa), activa `swap` en el config:
+```bash
+sudo nano /opt/zenbook-duo/config.yaml
+# Cambia:  swap: false  →  swap: true
+sudo systemctl restart zenbook-duo
+```
+
+**3. Si los IDs de dispositivo son distintos en tu equipo:**
+```bash
+cat /proc/bus/input/devices | grep -A3 "ELAN"
+# Anota los Vendor/Product de cada touchscreen y actualiza top_device y bottom_device
 ```
 
 ---

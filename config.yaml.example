@@ -6,6 +6,7 @@ features:
   auto_brightness: true   # Ajustar brillo según luz ambiental
   battery_protection: true  # Limitar carga máxima de la batería
   display_dock: true      # Apagar/encender pantalla inferior con el teclado
+  touchscreen_mapping: true  # Mapear cada touchscreen a su pantalla correcta
 
 keyboard:
   vendor_id: "0b05"       # Ver con: lsusb | grep -i asus
@@ -19,3 +20,8 @@ displays:
 
 battery:
   charge_limit: 80        # Porcentaje máximo de carga (recomendado: 80)
+
+touchscreen:
+  top_device: "04f3:425b"    # HID vendor:product del touchscreen superior (ELAN9008)
+  bottom_device: "04f3:425a" # HID vendor:product del touchscreen inferior (ELAN9009)
+  swap: false                # Cambiar a true si los touchscreens están invertidos

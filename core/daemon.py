@@ -7,6 +7,7 @@ from modules.display_dock import DockMonitor
 from modules.bluetooth import BluetoothManager
 from modules.auto_rotate import RotationManager
 from modules.auto_brightness import BrightnessManager
+from modules.touchscreen_mapping import TouchscreenMapper
 
 
 def run_in_user_session(command, username):
@@ -54,6 +55,11 @@ def main():
     features = config.get('features', {})
     user = config['system']['username']
 
+    # --- Mapeo de touchscreens ---
+    if features.get('touchscreen_mapping', True):
+        TouchscreenMapper(config=config, session_runner=run_in_user_session).apply()
+        print("[TOUCH] Mapeo de touchscreens aplicado")
+
     # --- Protección de batería ---
     if features.get('battery_protection', True):
         limite = config.get('battery', {}).get('charge_limit', 80)
@@ -91,7 +97,8 @@ def main():
             session_runner=run_in_user_session,
             username=user,
         )
-        print("[BRILLO] Brillo automático activado")
+        brightness_manager.start()
+        print("[BRILLO] Brillo automático activado (sincronización manual en paralelo)")
 
     # --- Rotación automática (el loop también alimenta auto_brightness) ---
     rotation_enabled = features.get('auto_rotate', True)
