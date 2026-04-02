@@ -1,5 +1,7 @@
 # Zenbook Duo Control — Ubuntu
 
+> Read this in English: [README_EN.md](README_EN.md)
+
 Control de hardware para el ASUS Zenbook Duo con doble pantalla OLED en Ubuntu 24. ASUS no proporciona soporte oficial para estas funciones en Linux, por lo que este proyecto las implementa directamente.
 
 ## Funciones
