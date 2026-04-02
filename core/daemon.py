@@ -82,7 +82,7 @@ def main():
         dock_monitor.start()
         print(f"[DOCK] Monitoreando teclado {vid}:{pid}")
 
-    is_docked = dock_monitor.is_docked if dock_monitor else lambda: False
+    is_docked = dock_monitor.is_docked if dock_monitor is not None else lambda: False
 
     # --- Brillo automático ---
     brightness_manager = None
