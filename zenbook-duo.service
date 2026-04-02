@@ -1,0 +1,31 @@
+[Unit]
+Description=Zenbook Duo Hardware Controller
+Documentation=https://github.com/haefrain/zenbook-duo-control-pantallas-ubuntu
+After=graphical.target
+Wants=graphical.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/zenbook-duo
+
+# Espera a que la sesión Wayland del usuario esté disponible (hasta 60s)
+ExecStartPre=/bin/bash -c '\
+  USER_UID=$(id -u __USERNAME__); \
+  for i in $(seq 60); do \
+    [ -S /run/user/$USER_UID/wayland-0 ] && exit 0; \
+    sleep 1; \
+  done; \
+  echo "Wayland no disponible tras 60s"; exit 1'
+
+ExecStart=/opt/zenbook-duo/venv/bin/python3 /opt/zenbook-duo/core/daemon.py
+
+Restart=on-failure
+RestartSec=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zenbook-duo
+
+[Install]
+WantedBy=graphical.target
