@@ -76,7 +76,7 @@ class TouchscreenMapper:
         return 'SDC', '0x419d', '0x00000000'
 
     def _set_output(self, device_id, value, username):
-        path = f"{self.DCONF_BASE}/{device_id}:/output"
+        path = f"{self.DCONF_BASE}/{device_id}/output"
         try:
             self.run_session(f"dconf write {path} \"{value}\"", username)
         except Exception as e:
