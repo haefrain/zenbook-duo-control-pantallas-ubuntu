@@ -9,10 +9,12 @@ El proyecto corre como un **servicio systemd de root** (`zenbook-duo.service`) q
 ```
 systemd (root)
 └── core/daemon.py
+    ├── TouchscreenMapper       → dconf sesión usuario (mapeo táctil por conector)
     ├── BatteryManager          → sysfs directo (root)
     ├── DockMonitor             → udev netlink (root)
     │   └── BluetoothManager    → bluetoothctl subprocess
     ├── BrightnessManager       → D-Bus GNOME (sesión usuario) + sysfs (root)
+    │   └── hilo manual_sync    → gdbus monitor (detecta teclas de brillo)
     └── RotationManager         → monitor-sensor subprocess
         ├── orientación         → gnome_randr.py vía D-Bus GNOME (sesión usuario)
         └── lux                 → BrightnessManager.apply_lux()
@@ -44,7 +46,8 @@ Esto permite que procesos root controlen la sesión gráfica del usuario sin nec
 │   ├── auto_brightness.py      ← BrightnessManager
 │   ├── battery.py              ← BatteryManager
 │   ├── display_dock.py         ← DockMonitor (udev)
-│   └── bluetooth.py            ← BluetoothManager
+│   ├── bluetooth.py            ← BluetoothManager
+│   └── touchscreen_mapping.py  ← TouchscreenMapper
 └── venv/                       ← entorno Python aislado
 ```
 
@@ -137,10 +140,33 @@ Convierte lecturas de lux (del sensor de luz de `iio-sensor-proxy`) a porcentaje
 
 Los rangos amplios actúan como histéresis natural: el brillo no cambia hasta salir claramente del rango actual.
 
-**Control de pantallas:**
+**Control de pantallas — ajuste automático (sensor):**
+
+`apply_lux()` llama a `_apply_both()`, que lanza `_set_gnome_brightness` y `_set_screenpad_brightness` en dos hilos paralelos (`threading.Thread`) para que ambas pantallas cambien simultáneamente sin que una bloquee a la otra.
 
 - **eDP-1 (`intel_backlight`):** vía D-Bus GNOME (`org.gnome.SettingsDaemon.Power.Screen`, propiedad `Brightness`). Acepta un entero 0–100 (porcentaje directo). Requiere sesión gráfica activa.
 - **eDP-2 (`card1-eDP-2-backlight` y `asus_screenpad`):** escritura directa a sysfs. Requiere root. El valor se escala proporcionalmente al `max_brightness` de cada interfaz. Antes de escribir se verifica `bl_power == 0` (pantalla encendida).
+
+**Sincronización con teclas de brillo (`start()` / `_manual_sync_loop`):**
+
+`start()` lanza un hilo daemon que ejecuta `gdbus monitor` en la sesión del usuario apuntando a `org.gnome.SettingsDaemon.Power`. Cada línea de salida se examina con una regex que extrae el nuevo valor de `Brightness`. Cuando GNOME cambia el brillo de eDP-1 (por tecla de teclado o cualquier otra fuente), el hilo captura el evento y llama directamente a `_set_screenpad_brightness()` para sincronizar eDP-2, sin pasar por `apply_lux()` ni por la tabla de rangos.
+
+---
+
+### `modules/touchscreen_mapping.py` — TouchscreenMapper
+
+El Zenbook Duo tiene dos touchscreens ELAN con EDID byte por byte idéntico (mismo modelo de panel). GNOME Wayland no puede distinguirlos automáticamente por EDID, por lo que el mapeo por defecto es incorrecto para uno de los dos.
+
+**Solución:** Mutter 46 acepta nombres de conector en el campo `output` de la ruta dconf por dispositivo, en lugar de datos EDID. `apply()` escribe:
+
+```
+/org/gnome/desktop/peripherals/touchscreens/04f3:425b/output → ['', 'eDP-1', '']
+/org/gnome/desktop/peripherals/touchscreens/04f3:425a/output → ['', 'eDP-2', '']
+```
+
+El path dconf usa el `vendor:product` HID del dispositivo de entrada (no de la pantalla). El valor `['', 'CONNECTOR', '']` es el formato que Mutter usa para el matching por nombre de conector en lugar de EDID.
+
+Los valores `top_device` y `bottom_device` son configurables en `config.yaml`. La opción `swap: true` intercambia ambos dispositivos sin necesidad de editar los IDs manualmente, útil si el mapeo queda invertido.
 
 ---
 
@@ -209,15 +235,18 @@ Boot
  └─ systemd activa zenbook-duo.service (tras graphical.target)
      └─ ExecStartPre espera /run/user/<UID>/wayland-0
          └─ daemon.py arranca
-             ├─ BatteryManager.set_charge_limit()   (sysfs, inmediato)
+             ├─ TouchscreenMapper.apply()            (dconf sesión usuario, inmediato)
+             ├─ BatteryManager.set_charge_limit()    (sysfs, inmediato)
              ├─ DockMonitor._sincronizar_estado_inicial()
              │   ├─ teclado presente → apaga eDP-2
              │   └─ teclado ausente  → enciende eDP-2, conecta BT
-             ├─ BrightnessManager (instancia, sin acción inmediata)
+             ├─ BrightnessManager.start()
+             │   └─ hilo: gdbus monitor (sincronización manual)
              └─ RotationManager.start()
                  └─ hilo: monitor-sensor
                      ├─ evento orientación → gnome_randr.py
                      └─ evento lux → BrightnessManager.apply_lux()
+                                         └─ _apply_both() en 2 hilos paralelos
 ```
 
 ---

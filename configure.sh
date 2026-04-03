@@ -64,12 +64,27 @@ ask_val() {
     echo "${val:-$2}"
 }
 
+detect_touchscreen_ids() {
+    # Busca dispositivos táctiles ELAN en /sys/class/input y extrae su VID:PID.
+    # Salida: líneas "vid:pid\tnombre_completo", ordenadas en reversa
+    # (04f3:425b antes de 04f3:425a → superior antes que inferior).
+    local name id
+    for name_file in /sys/class/input/event*/device/name; do
+        [ -f "$name_file" ] || continue
+        name=$(cat "$name_file" 2>/dev/null)
+        echo "$name" | grep -qi "^elan" || continue
+        # El nombre tiene la forma "ELAN9008:00 04F3:425B" — extrae el VID:PID
+        id=$(echo "$name" | grep -oE '[0-9A-Fa-f]{4}:[0-9A-Fa-f]{4}' | tr '[:upper:]' '[:lower:]')
+        [ -n "$id" ] && printf '%s\t%s\n' "$id" "$name"
+    done | sort -u -r
+}
+
 # ─── Mostrar config actual ────────────────────────────────────────────────────
 section "Configuración actual"
 echo -e "  Archivo: ${CYAN}$CONFIG${NC}"
 echo ""
 echo -e "  ${BOLD}Funciones:${NC}"
-for feat in auto_rotate auto_brightness battery_protection display_dock; do
+for feat in auto_rotate auto_brightness battery_protection display_dock touchscreen_mapping; do
     val=$(cfg_get "features.$feat")
     [ "$val" = "true" ] \
         && echo -e "    ${GREEN}✓${NC} $feat" \
@@ -82,10 +97,11 @@ section "Funciones"
 echo "  Cambia o confirma cada función (Enter = mantener valor actual):"
 echo ""
 
-FEAT_ROTATE=$(ask_yn     "Auto-rotación de pantallas"                        "$(bool_to_yn "$(cfg_get features.auto_rotate)")")
-FEAT_BRIGHTNESS=$(ask_yn "Brillo automático por sensor de luz ambiental"     "$(bool_to_yn "$(cfg_get features.auto_brightness)")")
-FEAT_BATTERY=$(ask_yn    "Protección de batería (limitar carga máxima)"      "$(bool_to_yn "$(cfg_get features.battery_protection)")")
-FEAT_DOCK=$(ask_yn       "Apagar/encender pantalla inferior con el teclado"  "$(bool_to_yn "$(cfg_get features.display_dock)")")
+FEAT_ROTATE=$(ask_yn        "Auto-rotación de pantallas"                        "$(bool_to_yn "$(cfg_get features.auto_rotate)")")
+FEAT_BRIGHTNESS=$(ask_yn    "Brillo automático por sensor de luz ambiental"     "$(bool_to_yn "$(cfg_get features.auto_brightness)")")
+FEAT_BATTERY=$(ask_yn       "Protección de batería (limitar carga máxima)"      "$(bool_to_yn "$(cfg_get features.battery_protection)")")
+FEAT_DOCK=$(ask_yn          "Apagar/encender pantalla inferior con el teclado"  "$(bool_to_yn "$(cfg_get features.display_dock)")")
+FEAT_TOUCHSCREEN=$(ask_yn   "Mapeo de touchscreens (corrige táctil de cada pantalla)" "$(bool_to_yn "$(cfg_get features.touchscreen_mapping)")")
 
 # ─── Batería ──────────────────────────────────────────────────────────────────
 BATTERY_LIMIT=$(cfg_get battery.charge_limit)
@@ -123,6 +139,53 @@ DISPLAY_TOP=$(ask_val "Pantalla superior" "$DISPLAY_TOP")
 DISPLAY_BOT=$(ask_val "Pantalla inferior" "$DISPLAY_BOT")
 SCALE=$(ask_val       "Factor de escala HiDPI" "$SCALE")
 
+# ─── Touchscreen ─────────────────────────────────────────────────────────────
+TOUCH_TOP=$(cfg_get touchscreen.top_device)
+TOUCH_BOT=$(cfg_get touchscreen.bottom_device)
+SWAP_TOUCH=$(cfg_get touchscreen.swap)
+[ -z "$TOUCH_TOP" ]         && TOUCH_TOP="04f3:425b"
+[ -z "$TOUCH_BOT" ]         && TOUCH_BOT="04f3:425a"
+[ "$SWAP_TOUCH" != "true" ] && SWAP_TOUCH=false
+
+if [ "$FEAT_TOUCHSCREEN" = "true" ]; then
+    section "Touchscreen"
+    echo "  Buscando dispositivos táctiles ELAN en el sistema..."
+    echo ""
+
+    DETECTED_TOUCH=$(detect_touchscreen_ids)
+    TOUCH_COUNT=$(echo "$DETECTED_TOUCH" | grep -c '^[0-9a-f]' || true)
+
+    if [ "$TOUCH_COUNT" -ge 2 ]; then
+        ok "Se encontraron $TOUCH_COUNT dispositivos táctiles:"
+        echo "$DETECTED_TOUCH" | while IFS=$'\t' read -r id name; do
+            echo -e "    ${CYAN}${id}${NC}  →  ${name}"
+        done
+        echo ""
+        # Solo sugerir los detectados si difieren de lo que ya hay en config
+        DET_TOP=$(echo "$DETECTED_TOUCH" | head -1 | cut -f1)
+        DET_BOT=$(echo "$DETECTED_TOUCH" | sed -n '2p' | cut -f1)
+        [ "$TOUCH_TOP" = "04f3:425b" ] && TOUCH_TOP="$DET_TOP"
+        [ "$TOUCH_BOT" = "04f3:425a" ] && TOUCH_BOT="$DET_BOT"
+    elif [ "$TOUCH_COUNT" -eq 1 ]; then
+        warn "Solo se detectó 1 dispositivo táctil:"
+        echo "$DETECTED_TOUCH"
+        echo ""
+        echo "  Para buscar manualmente:"
+        echo "    grep -rh '' /sys/class/input/event*/device/name 2>/dev/null | grep -i elan"
+        echo ""
+    else
+        warn "No se detectaron dispositivos táctiles automáticamente."
+        echo "  Para buscar manualmente:"
+        echo "    grep -rh '' /sys/class/input/event*/device/name 2>/dev/null | grep -i elan"
+        echo ""
+    fi
+
+    TOUCH_TOP=$(ask_val "ID táctil pantalla superior (${DISPLAY_TOP})" "$TOUCH_TOP")
+    TOUCH_BOT=$(ask_val "ID táctil pantalla inferior (${DISPLAY_BOT})" "$TOUCH_BOT")
+    SWAP_YN=$(ask_yn "¿Intercambiar táctiles? (si superior e inferior están al revés)" "$(bool_to_yn "$SWAP_TOUCH")")
+    [ "$SWAP_YN" = "true" ] && SWAP_TOUCH=true || SWAP_TOUCH=false
+fi
+
 # ─── Escribir config ──────────────────────────────────────────────────────────
 section "Aplicando configuración"
 
@@ -137,6 +200,7 @@ features:
   auto_brightness: $FEAT_BRIGHTNESS
   battery_protection: $FEAT_BATTERY
   display_dock: $FEAT_DOCK
+  touchscreen_mapping: $FEAT_TOUCHSCREEN
 
 keyboard:
   vendor_id: "$VID"
@@ -150,6 +214,11 @@ displays:
 
 battery:
   charge_limit: $BATTERY_LIMIT
+
+touchscreen:
+  top_device: "$TOUCH_TOP"
+  bottom_device: "$TOUCH_BOT"
+  swap: $SWAP_TOUCH
 YAML
 
 ok "config.yaml actualizado"
@@ -166,10 +235,11 @@ fi
 section "Configuración aplicada"
 echo ""
 echo -e "  ${BOLD}Funciones activas:${NC}"
-[ "$FEAT_ROTATE"     = "true" ] && echo -e "    ${GREEN}•${NC} Auto-rotación de pantallas"
-[ "$FEAT_BRIGHTNESS" = "true" ] && echo -e "    ${GREEN}•${NC} Brillo automático"
-[ "$FEAT_BATTERY"    = "true" ] && echo -e "    ${GREEN}•${NC} Protección de batería (límite: ${BATTERY_LIMIT}%)"
-[ "$FEAT_DOCK"       = "true" ] && echo -e "    ${GREEN}•${NC} Control de pantalla con teclado"
+[ "$FEAT_ROTATE"      = "true" ] && echo -e "    ${GREEN}•${NC} Auto-rotación de pantallas"
+[ "$FEAT_BRIGHTNESS"  = "true" ] && echo -e "    ${GREEN}•${NC} Brillo automático"
+[ "$FEAT_BATTERY"     = "true" ] && echo -e "    ${GREEN}•${NC} Protección de batería (límite: ${BATTERY_LIMIT}%)"
+[ "$FEAT_DOCK"        = "true" ] && echo -e "    ${GREEN}•${NC} Control de pantalla con teclado"
+[ "$FEAT_TOUCHSCREEN" = "true" ] && echo -e "    ${GREEN}•${NC} Mapeo de touchscreens"
 echo ""
 echo -e "  ${CYAN}Para ver el estado:${NC} systemctl status $SERVICE"
 echo ""

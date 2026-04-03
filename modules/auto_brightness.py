@@ -1,4 +1,6 @@
 import os
+import re
+import subprocess
 import threading
 
 BACKLIGHT_BOT_DRM = "/sys/class/backlight/card1-eDP-2-backlight"
@@ -24,15 +26,28 @@ class BrightnessManager:
         self._current_pct = None
         self._lock = threading.Lock()
 
+    def start(self):
+        """Inicia el hilo que sincroniza eDP-2 cuando el brillo cambia manualmente."""
+        thread = threading.Thread(target=self._manual_sync_loop, daemon=True)
+        thread.start()
+
     def apply_lux(self, lux):
         target = self._lux_to_pct(lux)
         with self._lock:
             if target == self._current_pct:
                 return
             print(f"\n[BRILLO] {lux:.1f} lux → {target}%")
-            self._set_gnome_brightness(target)
-            self._set_screenpad_brightness(target)
+            self._apply_both(target)
             self._current_pct = target
+
+    def _apply_both(self, pct):
+        """Aplica el brillo a ambas pantallas en paralelo."""
+        t1 = threading.Thread(target=self._set_gnome_brightness, args=(pct,))
+        t2 = threading.Thread(target=self._set_screenpad_brightness, args=(pct,))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
 
     def _lux_to_pct(self, lux):
         for (lo, hi, pct) in BRIGHTNESS_RANGES:
@@ -74,3 +89,32 @@ class BrightnessManager:
                     f.write(str(val))
             except Exception as e:
                 print(f"[ERROR] No se pudo escribir brillo en {path}: {e}")
+
+    def _manual_sync_loop(self):
+        """
+        Monitorea cambios de brillo en eDP-1 via D-Bus (teclas de brillo del teclado)
+        y los replica en tiempo real a eDP-2.
+        """
+        uid = subprocess.check_output(
+            f"id -u {self._username}", shell=True
+        ).decode().strip()
+
+        cmd = (
+            f"sudo -u {self._username} "
+            f"env XDG_RUNTIME_DIR=/run/user/{uid} "
+            f"WAYLAND_DISPLAY=wayland-0 "
+            f"gdbus monitor --session "
+            f"--dest org.gnome.SettingsDaemon.Power "
+            f"--object-path /org/gnome/SettingsDaemon/Power"
+        )
+        process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, text=True)
+        for line in iter(process.stdout.readline, ''):
+            match = re.search(r"'Brightness':\s*<(\d+)>", line)
+            if match:
+                pct = int(match.group(1))
+                with self._lock:
+                    if pct == self._current_pct:
+                        continue
+                    self._current_pct = pct
+                print(f"[BRILLO] Tecla → {pct}% (sincronizando eDP-2)")
+                self._set_screenpad_brightness(pct)
