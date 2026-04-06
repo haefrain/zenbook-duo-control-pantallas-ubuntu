@@ -7,11 +7,18 @@ features:
   battery_protection: true  # Limitar carga máxima de la batería
   display_dock: true      # Apagar/encender pantalla inferior con el teclado
   touchscreen_mapping: true  # Mapear cada touchscreen a su pantalla correcta
+  power_profile: true     # Cambiar platform_profile y refresh rate según AC/batería
+  oled_care: true         # Atenuar la pantalla inferior tras inactividad táctil
+  keyboard_backlight: true  # Reaplicar el nivel del backlight del teclado dock
+  fn_keys: true           # Capturar teclas Fn vendor del teclado BT (brillo, mute mic)
 
 keyboard:
   vendor_id: "0b05"       # Ver con: lsusb | grep -i asus
-  product_id: "1b2c"
+  product_id: "1b2c"      # Producto USB del teclado cuando está dockeado
   mac_address: "XX:XX:XX:XX:XX:XX"  # Ver con: bluetoothctl devices
+  backlight_level: 1            # 0 = apagado, 1..3 = niveles
+  backlight_vendor: "0b05"
+  backlight_product: "1b2c"     # Mismo USB ID; el backlight sólo aplica dockeado
 
 displays:
   top: "eDP-1"
@@ -21,7 +28,33 @@ displays:
 battery:
   charge_limit: 80        # Porcentaje máximo de carga (recomendado: 80)
 
+bluetooth:
+  devices:                # MACs adicionales a reconectar (ratón, auriculares, etc.)
+    - "YY:YY:YY:YY:YY:YY" # Ver con: bluetoothctl devices
+  reconnect_on_unlock: true  # Reconectar todos los dispositivos BT al desbloquear pantalla
+
+watchdog:
+  display_refresh_minutes: 0   # 0 = desactivado (recomendado). >0 fuerza un
+                               # ApplyMonitorsConfig --force cada N minutos.
+                               # No previene congelamientos del compositor;
+                               # úsalo sólo si tienes un caso muy específico.
+
 touchscreen:
   top_device: "04f3:425b"    # HID vendor:product del touchscreen superior (ELAN9008)
   bottom_device: "04f3:425a" # HID vendor:product del touchscreen inferior (ELAN9009)
   swap: false                # Cambiar a true si los touchscreens están invertidos
+
+power_profiles:
+  on_ac:
+    profile: performance     # quiet | balanced | performance
+    refresh_rate: 120        # Hz; null para no tocar
+  on_battery:
+    profile: balanced
+    refresh_rate: 60
+
+oled_care:
+  idle_dim_enabled: true     # Atenuar eDP-2 tras inactividad táctil
+  idle_minutes: 5            # Minutos sin tocar para considerarla "ociosa"
+  dim_percent: 5             # Nivel al que se atenúa
+  bottom_vendor: "04f3"      # Vendor del touchscreen inferior (debe coincidir
+  bottom_product: "425a"     # con touchscreen.bottom_device)

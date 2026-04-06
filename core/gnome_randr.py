@@ -426,6 +426,7 @@ class ActionRequest:
     def __init__(self):
         self.print_current = False
         self.dry_run = False
+        self.force = False
         # 1: temporary, 2: persistent
         self.config_method = 1
         self.global_scale = None
@@ -627,6 +628,10 @@ class ConfigInfo:
 
         if res == 'auto':
             new_mode = get_pref_mode(monitor)
+            if new_mode:
+                # Resolver 'auto' a la resolución real del modo preferido,
+                # para que un --rate posterior pueda buscar modos por res.
+                res = '{}x{}'.format(new_mode[1], new_mode[2])
         else:
             new_mode = get_mode_by_res(res, monitor)
 
@@ -738,6 +743,8 @@ while n < len(sys.argv):
 
     if arg == '-h' or arg == '--help':
         usage()
+    elif arg == '--force':
+        requested_actions.force = True
     elif arg == '--current':
         requested_actions.print_current = True
     elif arg == '--dry-run':
@@ -859,7 +866,7 @@ if (len(requested_actions.output_config) == 0 or
 new_lm = monmap_to_lm(config_info, config_info.monmap)
 print_new_config(new_lm)
 
-if not requested_actions.dry_run and config_info.config_changed(new_lm):
+if not requested_actions.dry_run and (requested_actions.force or config_info.config_changed(new_lm)):
     dc_iface.ApplyMonitorsConfig(config_info.serial,
                                  requested_actions.config_method, new_lm, {})
 else:

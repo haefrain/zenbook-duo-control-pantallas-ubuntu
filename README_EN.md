@@ -6,11 +6,14 @@ Hardware control for the ASUS Zenbook Duo with dual OLED screens on Ubuntu 24. A
 
 | Feature | Description |
 |---|---|
-| **Auto-rotation** | Rotates both screens when the device is turned (laptop mode ↔ book mode) |
-| **Auto-brightness** | Adjusts brightness on both screens in parallel using the built-in ambient light sensor; syncs eDP-2 when brightness keys are used |
+| **Auto-rotation** | Rotates both screens when the device is turned (laptop mode ↔ book mode), with debouncing to coalesce rapid accelerometer events |
+| **Auto-brightness** | Adjusts brightness on both screens in parallel using the built-in ambient light sensor; syncs eDP-2 when brightness keys are used, with debouncing and self-write echo muting to prevent feedback loops |
 | **Battery protection** | Caps the maximum charge level to extend battery lifespan |
-| **Secondary screen control** | Turns off the lower screen when the keyboard is attached and turns it back on when detached; automatically reconnects the Bluetooth keyboard |
-| **Touchscreen mapping** | Assigns each touchscreen to its correct display in GNOME Wayland (works around the identical-EDID problem shared by both panels) |
+| **Secondary screen control** | Turns off the lower screen when the keyboard is attached and turns it back on when detached; reconnects the Bluetooth keyboard and other devices on screen unlock |
+| **Touchscreen mapping** | Assigns each touchscreen to its correct display in GNOME Wayland (resolves the identical-EDID problem between both panels using the 4th element of the dconf array, which Mutter ≥ 42 accepts as connector name tie-breaker) |
+| **Automatic power profile** | Applies different `platform_profile` and refresh rate based on AC/battery state (e.g. `performance @ 120 Hz` plugged in, `balanced @ 60 Hz` on battery) by listening to UPower events |
+| **OLED care** | Dims the lower screenpad after a configurable period of touch inactivity, to preserve the OLED panel against static content |
+| **Dock keyboard backlight** | Reapplies the keyboard backlight level when the USB keyboard is attached, via a proprietary ASUS HID feature report |
 
 ---
 
@@ -123,11 +126,17 @@ features:
   battery_protection: true          # Battery charge limit
   display_dock: true                # Lower screen control with keyboard
   touchscreen_mapping: true         # Map each touchscreen to its correct display
+  power_profile: true               # Switch profile + refresh rate per AC/battery
+  oled_care: true                   # Dim the lower screen after touch inactivity
+  keyboard_backlight: true          # Reapply the keyboard backlight on dock
 
 keyboard:
   vendor_id: "0b05"                 # See: lsusb | grep -i asus
-  product_id: "1b2c"
-  mac_address: "XX:XX:XX:XX:XX:XX" # See: bluetoothctl devices
+  product_id: "1b2c"                # USB product ID of the keyboard when docked
+  mac_address: "XX:XX:XX:XX:XX:XX"  # See: bluetoothctl devices
+  backlight_level: 1                # 0 = off, 1..3 = brightness levels
+  backlight_vendor: "0b05"
+  backlight_product: "1b2c"         # The backlight only applies when docked
 
 displays:
   top: "eDP-1"                      # Name of the top screen
@@ -137,10 +146,35 @@ displays:
 battery:
   charge_limit: 80                  # Maximum charge percentage
 
+bluetooth:
+  devices:                          # Extra MACs to reconnect on screen unlock
+    - "YY:YY:YY:YY:YY:YY"
+  reconnect_on_unlock: true
+
+watchdog:
+  display_refresh_minutes: 0        # 0 = disabled (recommended). >0 forces an
+                                    # ApplyMonitorsConfig --force every N minutes.
+                                    # Does not prevent compositor freezes.
+
 touchscreen:
   top_device: "04f3:425b"           # HID vendor:product of the top touchscreen (ELAN9008)
   bottom_device: "04f3:425a"        # HID vendor:product of the bottom touchscreen (ELAN9009)
   swap: false                       # Set to true if the touchscreens are mapped in reverse
+
+power_profiles:
+  on_ac:
+    profile: performance            # quiet | balanced | performance
+    refresh_rate: 120               # Hz; null to leave it unchanged
+  on_battery:
+    profile: balanced
+    refresh_rate: 60
+
+oled_care:
+  idle_dim_enabled: true            # Dim eDP-2 after touch inactivity
+  idle_minutes: 5                   # Minutes without touch to consider it idle
+  dim_percent: 5                    # Brightness level when dimmed
+  bottom_vendor: "04f3"             # Must match touchscreen.bottom_device
+  bottom_product: "425a"
 ```
 
 ### How to find each value
@@ -278,28 +312,38 @@ pgrep -a gsd-power
 
 ### Auto-brightness does not change the lower screen (eDP-2 / screenpad)
 
-The lower screen uses two sysfs interfaces that require root. The daemon must run as a service (not manually without sudo).
+The lower screen is controlled **only** through `/sys/class/backlight/asus_screenpad/` (root required). Previously the daemon also wrote to `card1-eDP-2-backlight`, but that caused a feedback loop with `gnome-settings-daemon` (which monitors that DRM backlight) — it has been removed.
 
 ```bash
-# Do the interfaces exist?
-ls /sys/class/backlight/card1-eDP-2-backlight/
+# Does the interface exist?
 ls /sys/class/backlight/asus_screenpad/
 
 # Manual test as root:
 echo 120 | sudo tee /sys/class/backlight/asus_screenpad/brightness
-echo 200 | sudo tee /sys/class/backlight/card1-eDP-2-backlight/brightness
 ```
 
 ---
 
 ### Brightness keys do not change eDP-2
 
-The daemon monitors the GNOME D-Bus for manual brightness changes and replicates them to eDP-2. If it is not working, check that the service is running and that `gnome-settings-daemon` is active:
+The daemon monitors the GNOME D-Bus for brightness changes and replicates them to the screenpad with debouncing (it coalesces GNOME's interpolated 1%-step animation). If it is not working, check that the service is running and that `gnome-settings-daemon` is active:
 
 ```bash
 pgrep -a gsd-power
-journalctl -u zenbook-duo -f   # look for lines "[BRILLO] Tecla →"
+journalctl -u zenbook-duo -f   # look for lines "[BRILLO] Sync →"
 ```
+
+---
+
+### Brightness goes down on its own even when `auto_brightness` is `false`
+
+GNOME most likely has its own automatic brightness via the ambient light sensor enabled, independent of this project. The daemon warns you about this on startup if it detects it. To disable it:
+
+```bash
+gsettings set org.gnome.settings-daemon.plugins.power ambient-enabled false
+```
+
+If you prefer to leave it on in GNOME, note that `BrightnessManager` will replicate those changes to the screenpad (this is the expected behaviour).
 
 ---
 
@@ -308,13 +352,21 @@ journalctl -u zenbook-duo -f   # look for lines "[BRILLO] Tecla →"
 **1. Check that the mapping was applied:**
 ```bash
 dconf dump /org/gnome/desktop/peripherals/touchscreens/
-# Should show:
-# [04f3:425b/]
-# output=['', 'eDP-1', '']
+# Should show 4-element arrays (vendor, product, serial, connector):
+# [04f3:425b]
+# output=['SDC', '0x419d', '0x00000000', 'eDP-1']
 #
-# [04f3:425a/]
-# output=['', 'eDP-2', '']
+# [04f3:425a]
+# output=['SDC', '0x419d', '0x00000000', 'eDP-2']
 ```
+
+> **Technical note:** both Zenbook Duo panels report identical EDID
+> (same `vendor`, `product` and `serial`), so Mutter's standard matching
+> cannot tell them apart. Mutter ≥ 42 accepts a fourth element in the
+> `output` array which is the connector name (`eDP-1`/`eDP-2`) and uses
+> it specifically as a tie-breaker when duplicate monitors are detected.
+> The daemon writes all 4 elements at startup; **Mutter only reads the
+> setting when the device is added, so the first apply requires a re-login**.
 
 **2. If the mapping is reversed** (eDP-2 touch acts on eDP-1 and vice versa), enable `swap` in the config:
 ```bash
@@ -368,6 +420,68 @@ systemctl show zenbook-duo --property=User
 
 ---
 
+### The automatic power profile does not switch when unplugging the charger
+
+```bash
+# Check the active profile:
+cat /sys/firmware/acpi/platform_profile
+
+# Verify the feature is enabled and that UPower emits events:
+grep power_profile /opt/zenbook-duo/config.yaml
+journalctl -u zenbook-duo -f | grep POWER
+```
+
+If UPower is not responding, make sure `upower.service` is running:
+```bash
+systemctl status upower
+```
+
+---
+
+### The keyboard backlight does not light up on dock
+
+**1. Check that the USB keyboard appears after docking:**
+```bash
+lsusb | grep 0b05
+```
+
+If nothing shows up, the keyboard is not enumerating as USB; the backlight is only controllable when physically attached (in Bluetooth mode the keyboard sits underneath the lower screen, so it does not apply).
+
+**2. Verify the hidraw device exists:**
+```bash
+for h in /sys/class/hidraw/hidraw*; do
+  cat "$h/device/uevent" 2>/dev/null | grep -i 1B2C && echo "  → $(basename $h)"
+done
+```
+
+**3. Change the level manually** by editing `keyboard.backlight_level` (0–3) in `config.yaml` and restarting the service:
+```bash
+sudo nano /opt/zenbook-duo/config.yaml
+sudo systemctl restart zenbook-duo
+```
+
+---
+
+### OLED idle dim does not activate
+
+```bash
+# Check that the daemon sees the bottom touchscreen devices:
+journalctl -u zenbook-duo | grep OLED
+# Should show: "[OLED] monitoreando N input device(s) del eDP-2"
+```
+
+If it says `No encontré touchscreen…`, check that `oled_care.bottom_vendor` and `oled_care.bottom_product` match the real IDs:
+```bash
+for d in /sys/class/input/event*/device; do
+  v=$(cat $d/id/vendor 2>/dev/null)
+  p=$(cat $d/id/product 2>/dev/null)
+  n=$(cat $d/name 2>/dev/null)
+  [[ "$n" == *ELAN* ]] && echo "$v:$p $n"
+done
+```
+
+---
+
 ### Full one-shot diagnostic
 
 ```bash
@@ -377,7 +491,83 @@ echo "=== Sensor ===" && systemctl status iio-sensor-proxy --no-pager
 echo "=== Backlight eDP-1 ===" && cat /sys/class/backlight/intel_backlight/brightness
 echo "=== Backlight eDP-2 ===" && cat /sys/class/backlight/asus_screenpad/brightness
 echo "=== Battery ===" && cat /sys/class/power_supply/BAT0/charge_control_end_threshold 2>/dev/null || echo "path not found"
+echo "=== Power profile ===" && cat /sys/firmware/acpi/platform_profile
+echo "=== AC online ===" && cat /sys/class/power_supply/AC0/online
+echo "=== Touchscreens dconf ===" && dconf dump /org/gnome/desktop/peripherals/touchscreens/
 ```
+
+---
+
+## Optional system tweaks (performance)
+
+These tweaks are not part of the daemon, they are operating system settings. They are safe for the hardware (no physical damage possible — Tjmax/PL/VRM protections always remain active) and reversible by editing a text file.
+
+### PCIe ASPM in `performance` mode
+
+By default the firmware leaves PCIe ASPM in conservative states that add latency to the bus (affects NVMe among others). Forcing it to `performance` keeps it always active. Cost: ~1-2 W more in idle.
+
+```bash
+# 1. Backup
+sudo cp /etc/default/grub /etc/default/grub.bak.$(date +%Y%m%d-%H%M%S)
+
+# 2. Add the parameter to the cmdline
+sudo nano /etc/default/grub
+# Change:  GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"
+# To:      GRUB_CMDLINE_LINUX_DEFAULT="quiet splash pcie_aspm=performance"
+
+# 3. Regenerate grub.cfg and reboot
+sudo update-grub
+sudo reboot
+
+# 4. After reboot, verify:
+cat /sys/module/pcie_aspm/parameters/policy
+# Should show: default performance [performance] powersave powersupersave
+```
+
+To revert: edit `/etc/default/grub`, remove the parameter, `sudo update-grub`, reboot.
+
+### Temperature monitoring (`lm-sensors`)
+
+Read-only, modifies nothing. Useful for verifying whether there is real thermal throttling under load.
+
+```bash
+sudo apt install -y lm-sensors
+sudo sensors-detect --auto
+sensors
+```
+
+Sensors you'll see on this device:
+- `coretemp-isa-0000`: per-core temperatures (Tjmax = 110 °C)
+- `nvme-pci-e100`: NVMe SSD temperatures
+- `asus-isa-0000` / `acpi_fan-isa-0000`: fan RPM
+- `BAT0-acpi-0`: battery voltage and instant power consumption
+- `ucsi_source_psy_USBC*`: negotiated current of the USB-C charger
+- `acpitz-acpi-0`: **ignore this one**, on Zenbook Duo the ACPI firmware exposes it as a constant value (≈100 °C) that is not a real sensor
+
+---
+
+## Sustained-load performance — the charger is the key
+
+The Zenbook Duo's Core Ultra 9 185H can pull up to ~115 W of boost (PL2) and a sustained PL1 above 60 W under real load. **If your USB-C charger does not deliver at least 90-100 W, the device will discharge the battery to cover the gap and, when the battery drops, the firmware will aggressively reduce CPU TDP** — you lose sustained turbo because of the charger, not because of the OS.
+
+To check the actual wattage your charger negotiates:
+
+```bash
+# Look at the current of the active USB-C port
+sensors | grep -A1 ucsi_source_psy
+# curr1: 3.25 A → at USB-C PD 20 V that is 65 W
+# curr1: 5.00 A → 100 W (the desirable target)
+```
+
+To confirm whether the charger is your bottleneck, run a sustained load and check whether the battery switches to `Discharging` while AC is plugged:
+
+```bash
+sudo apt install -y stress-ng
+stress-ng --cpu 0 --timeout 120s &
+watch -n1 'echo "===" && cat /sys/class/power_supply/BAT0/status && grep MHz /proc/cpuinfo | head -3 && sensors | grep Package'
+```
+
+If `BAT0/status` switches to `Discharging` while `AC0/online` is 1, the charger is insufficient and a 100 W (or higher) PD charger will improve sustained performance by **20-40 %**, well above any software tweak.
 
 ---
 
