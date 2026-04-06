@@ -6,6 +6,10 @@ FEATURE_DEFAULTS = {
     'auto_brightness': True,
     'battery_protection': True,
     'display_dock': True,
+    'touchscreen_mapping': True,
+    'power_profile': True,
+    'oled_care': True,
+    'keyboard_backlight': True,
 }
 
 def load_config(config_path="config.yaml"):

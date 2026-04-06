@@ -8,6 +8,7 @@ Wants=graphical.target
 Type=simple
 User=root
 WorkingDirectory=/opt/zenbook-duo
+Environment=PYTHONUNBUFFERED=1
 
 # Espera a que la sesión Wayland del usuario esté disponible (hasta 60s)
 ExecStartPre=/bin/bash -c '\
