@@ -382,6 +382,11 @@ def monmap_to_lm(config_info, monmap):
             # use the conf values which accounts for rotation
             w = conf['w']
             h = conf['h']
+            # in logical layout mode Mutter positions and sizes monitors in
+            # logical pixels: mode size divided by the monitor's scale
+            if config_info.layout_mode == 'logical' and conf['scale']:
+                w = round(w / conf['scale'])
+                h = round(h / conf['scale'])
 
             x = y_info[col_idx][0]
             y = y_info[col_idx][2]
@@ -443,8 +448,8 @@ class ConfigInfo:
             self.x_max = 0
             self.y_max = 0
         if 'layout-mode' in props:
-            self.layout_mode = {1: 'physical',
-                                2: 'logical'}.get(props['layout-mode'])
+            self.layout_mode = {1: 'logical',
+                                2: 'physical'}.get(props['layout-mode'])
         else:
             self.layout_mode = 'unknown'
         if ('global-scale-required' in props and 
